@@ -9,45 +9,43 @@ const fs = require("fs");
 const PORT = 3000;
 const filename = "./todos.txt";
 
+// request.query returns the URI parameters of the request
+// e.g. http://localhost:3000/todo/19455f26-4a8e-4816-b5a7-00aa641227e9
+// to access the parameter we do: request.params.uuid
 
-function returnItem(uuid) {
+
+
+
+function readArrayFromFile(file) {
+  // This function returns an array on success, or null on failure
+  var array;
   try {
-    var todosArray = JSON.parse(fs.readFileSync(filename));
+    // If this is ok, we opened the file and read the array.
+    array = JSON.parse(fs.readFileSync(file));
+    return array;
   } catch (err) {
-    console.log("Could not retrieve todo items.")
-    console.log("Error code: " + err.code);
-    return -2;
-  }
-  var item = todosArray.findIndex(function(element) {
-    return element.uuid === uuid;
-  });
-  if (item >= 0) {
-    item = todosArray[item];
-    return item;
-  } else {
-    return -1;
+    if (err.code !== "ENOENT") {
+      console.log("There was a server error. I could not add todo item.")
+      console.log("Error code: " + err.code);
+      return null;
+    } else {
+      // There wasn't a file to read from. We create a new array
+      array = [];
+      return array;
+    }
   }
 }
 
-function updateItem(arr, item) {
-  var index = arr.findIndex(function(element) {
-    return element.uuid === item.uuid;
-  });
-  console.log(index);
-  if (index >= 0) {
-    arr[index] = item;
-  } else {
-    return -1;
-  }
+function writeArrayToFile(file, array) {
   try {
-    fs.writeFileSync(filename, JSON.stringify(arr));
+    fs.writeFileSync(file, JSON.stringify(array));
     return 0;
   } catch (err) {
-    console.log("I could not update the todo item");
     console.log("Error code: " + err.code);
-    return -2;
+    return -1;
   }
 }
+
 
 // This has no path specified so the callback function is called for every
 // request on the application (eg. /, /put, /whatever).
@@ -55,175 +53,205 @@ function updateItem(arr, item) {
 // new body object containing the parsed JSON data on the request object.
 app.use(bodyParser.json());
 
+
 app.get("/", function(request, response) {
-	// request.query returns the URI parameters of the request
-	// e.g. http://localhost:3000/?message=World!
 	let message = (request.query.message === undefined) ? "World!" : request.query.message;
 	console.log("Hello", message);
 	response.send(`Hello ${message}`);
 });
 
-
+// Update the to-do item with id equal uuid
 app.put("/todos/:uuid", function(request, response) {
   if (request.body.description === undefined) {
     console.log("You should provide a new todo description");
-    response.status(500).send("ERROR");
+    response.status(400).send("Bad Request");
     return;
   }
+  // Access the uuid from the clien request
   var uuid = request.params.uuid;
-  var item = returnItem(uuid);
-  if (item === -1 ) {
+  // Read the array with the to-do items
+  var todosArray = readArrayFromFile(filename);
+  if (todosArray === null) {
+    // We had a serious error. Can't complete PUT request
+    response.status(500).send("Internal Server Error");
+    return;
+  }
+  // Find the index in the array of the to-do item with the given uuid
+  var index = todosArray.findIndex(function(element) {
+    return element.uuid === uuid;
+  });
+  if (index === -1) {
     console.log("Could not find such item");
-    response.status(404).send("OK");
-  } else if (item === -2 ) {
-    response.status(500).send("ERROR");
+    response.status(404).send("Not Found");
   } else {
-    var todosArray = JSON.parse(fs.readFileSync(filename));
-    item.description = request.body.description;
-    if (updateItem(todosArray, item) === 0) {
-      console.log("Item updated.")
-      response.status(201).send("OK");
-    };
+    todosArray[index].description = request.body.description;
+  }
+  if (writeArrayToFile(filename, todosArray) === 0) {
+    console.log(`todo with uuid: ${uuid} updated.`);
+    response.status(200).send("OK");
+  } else {
+    response.status(500).send("Internal Server Error");
   }
 });
 
+// Set the done flag of the uuid item to false
 app.delete("/todos/:uuid/done", function(request, response) {
   var uuid = request.params.uuid;
-  var item = returnItem(uuid);
-  if (item === -1 ) {
+  var todosArray = readArrayFromFile(filename);
+  if (todosArray === null) {
+    // We had a serious error. Can't complete DELETE request
+    response.status(500).send("Internal Server Error");
+    return;
+  }
+  // Find the index in the array of the to-do item with the given uuid
+  var index = todosArray.findIndex(function(element) {
+    return element.uuid === uuid;
+  });
+  if (index === -1) {
     console.log("Could not find such item");
-    response.status(404).send("OK");
-  } else if (item === -2 ) {
-    response.status(500).send("ERROR");
+    response.status(404).send("Not Found");
   } else {
-    console.log(`Mark todo item ${uuid} as not done`);
-    var todosArray = JSON.parse(fs.readFileSync(filename));
-    item.done = "false";
-    if (updateItem(todosArray, item) === 0) {
-      console.log("Item updated.")
-      response.status(201).send("OK");
-    };
+    todosArray[index].done = "false";
+  }
+  if (writeArrayToFile(filename, todosArray) === 0) {
+    console.log(`todo with uuid: ${uuid} deleted.`);
+    response.status(204).send("No Content");
+  } else {
+    response.status(500).send("Internal Server Error");
   }
 });
 
+// Delete the to-do item with id equal to uuid
 app.delete("/todos/:uuid", function(request, response) {
   var uuid = request.params.uuid;
-  var item = returnItem(uuid);
-  if (item === -1 ) {
+  var todosArray = readArrayFromFile(filename);
+  if (todosArray === null) {
+    // We had a serious error. Can't complete DELETE request
+    response.status(500).send("Internal Server Error");
+    return;
+  }
+  // Find the index in the array of the to-do item with the given uuid
+  var index = todosArray.findIndex(function(element) {
+    return element.uuid === uuid;
+  });
+  if (index === -1) {
     console.log("Could not find such item");
-    response.status(404).send("OK");
-  } else if (item === -2 ) {
-    response.status(500).send("ERROR");
+    response.status(404).send("Not Found");
   } else {
-    console.log(`Deleting item with uuid: ${item.uuid}`);
-    // Since we are here we know there is the file, and the item
-    // on the file
-    var todosArray = JSON.parse(fs.readFileSync(filename));
-    var index = todosArray.findIndex(function(element) {
-      return element.uuid === uuid;
-    });
     todosArray.splice(index, 1);
-    fs.writeFileSync(filename, JSON.stringify(todosArray));
-    response.status(202).send("OK");
+  }
+  if (writeArrayToFile(filename, todosArray) === 0) {
+    console.log(`todo with uuid: ${uuid} deleted.`);
+    response.status(204).send("No Content");
+  } else {
+    response.status(500).send("Internal Server Error");
   }
 });
 
+// Clear all to-do items
 app.delete("/todos", function(request, response) {
   // Reset todo file
-  try {
-		fs.writeFileSync(filename, JSON.stringify([]));
-	} catch (err) {
-		console.log(err.code);
-	}
+  if (writeArrayToFile(filename, []) === 0) {
+    console.log(`todo list cleared.`);
+    response.status(204).send("No Content");
+  } else {
+    response.status(500).send("Internal Server Error");
+  }
 });
 
+// List all to-do items
 app.get("/todos", function(request, response) {
-  console.log("List all todos from file");
-  try {
-		var todosArray = JSON.parse(fs.readFileSync(filename));
-    console.log("There are " + todosArray.length + " todo items.");
-    console.log("UUID                                 | Done | Todo");
-    for (var i = 0; i < todosArray.length; i++) {
-      var item = todosArray[i];
-      var uuid = item.uuid;
-      var description = item.description;
-      var done = (item.done === "true") ? " + " : " - ";
-      console.log("" + uuid + " | " + done + "  | " + description);
-    }
-    response.status(200).send("OK");
-	} catch (err) {
-		console.log(err.code);
-		return null;
-    response.status(500).send("ERROR");
-	}
+  var todosArray = readArrayFromFile(filename);
+  if (todosArray === null) {
+    // We had a serious error. Can't complete GET request
+    response.status(500).send("Internal Server Error");
+    return;
+  }
+  console.log("There are " + todosArray.length + " todo items.");
+  console.log("UUID                                 | Done | Todo");
+  for (var i = 0; i < todosArray.length; i++) {
+    var item = todosArray[i];
+    var uuid = item.uuid;
+    var description = item.description;
+    var done = (item.done === "true") ? " + " : " - ";
+    console.log("" + uuid + " | " + done + "  | " + description);
+  }
+  response.status(200).send("OK");
 });
 
+// List a single to-do item with id equal to uuid
 app.get("/todos/:uuid", function(request, response) {
-	// request.query returns the URI parameters of the request
-	// e.g. http://localhost:3000/todo/19455f26-4a8e-4816-b5a7-00aa641227e9
-	// to access the parameter we do: request.params.uuid
   var uuid = request.params.uuid;
-  var item = returnItem(uuid);
-  if (item === -1 ) {
-    console.log("Could not find such item");
-    response.status(404).send("OK");
-  } else if (item === -2 ) {
-    response.status(500).send("ERROR");
+  var todosArray = readArrayFromFile(filename);
+  if (todosArray === null) {
+    // We had a serious error. Can't complete GET request
+    response.status(500).send("Internal Server Error");
+    return;
+  }
+  // Find the index in the array of the to-do item with the given uuid
+  var index = todosArray.findIndex(function(element) {
+    return element.uuid === uuid;
+  });
+  if (index === -1) {
+    console.log(`Could not find todo item with uuid: ${uuid}`);
+    response.status(404).send("Not Found");
   } else {
     console.log(" Done | Todo");
-    var description = item.description;
-    var done = (item.done === "true") ? "  + " : "  - ";
+    var description = todosArray[index].description;
+    var done = (todosArray[index].done === "true") ? "  + " : "  - ";
     console.log(done + "  | " + description);
     response.status(200).send("OK");
   }
 });
 
+// Create a new to-do
 app.post("/todos", function(request, response) {
 	if (request.body.todo === undefined) response.status(400).send();
   var obj = request.body.todo;
   obj.uuid = uuidv4();
-  // FIXME - Save todo on file.
-  var todosArray = null;
-  try {
-    todosArray = JSON.parse(fs.readFileSync(filename));
-  } catch (err) {
-    if (err.code !== "ENOENT") {
-      console.log("There was an error. I could not add todo item.")
-      console.log("Error code: " + err.code);
-      return null;
-    } else {
-      todosArray = [];
-    }
+
+  var todosArray = readArrayFromFile(filename);
+  if (todosArray === null) {
+    // We had a serious error. Can't complete POST request
+    response.status(500).send("Internal Server Error");
+    return;
   }
   todosArray.push(obj);
   try {
     fs.writeFileSync(filename, JSON.stringify(todosArray));
   } catch (err) {
     console.log(err.code);
+    response.status(500).send("Internal Server Error");
   }
-	// Sending response with 201 status because
-	// POST changes data and should the client
-	// would expect the CREATED status response
-	// which is 201.
-	response.status(201).send("OK");
+	response.status(201).send("Created");
 });
 
+// Set the done flag of the uuid item to true
 app.post("/todos/:uuid/done", function(request, response) {
   var uuid = request.params.uuid;
-  var item = returnItem(uuid);
-  if (item === -1 ) {
-    console.log("Could not find such item");
-    response.status(404).send("OK");
-  } else if (item === -2 ) {
-    response.status(500).send("ERROR");
+  var todosArray = readArrayFromFile(filename);
+  if (todosArray === null) {
+    // We had a serious error. Can't complete POST request
+    response.status(500).send("Internal Server Error");
+    return;
+  }
+  // Find the index in the array of the to-do item with the given uuid
+  var index = todosArray.findIndex(function(element) {
+    return element.uuid === uuid;
+  });
+  if (index === -1) {
+    console.log(`Could not find todo item with uuid: ${uuid}`);
+    response.status(404).send("Not Found");
   } else {
-    console.log(`Mark todo item ${uuid} as done`);
-    var todosArray = JSON.parse(fs.readFileSync(filename));
-    item.done = "true";
-    if (updateItem(todosArray, item) === 0) {
-      console.log("Item updated.")
-      response.status(201).send("OK");
-    };
+    todosArray[index].done = "true";
+  }
+  try {
+    fs.writeFileSync(filename, JSON.stringify(todosArray));
+    console.log("Item updated.")
+    response.status(204).send("No Content");
+  } catch (err) {
+    console.log(err.code);
+    response.status(500).send("Internal Server Error");
   }
 });
 
